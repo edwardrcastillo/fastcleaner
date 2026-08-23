@@ -807,7 +807,7 @@ def install_context_menu():
 </dict>
 </plist>"""
         
-        wflow_xml = """<?xml version="1.0" encoding="UTF-8"?>
+        wflow_xml = r"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -920,7 +920,7 @@ done</string>
             os.path.expanduser("~/.local/share/nautilus/scripts"),
             os.path.expanduser("~/.local/share/nemo/scripts")
         ]
-        nautilus_script = """#!/usr/bin/env bash
+        nautilus_script = r"""#!/usr/bin/env bash
 # FastCleaner Context Script
 TARGET="${NAUTILUS_SCRIPT_SELECTED_FILE_PATHS:-$NEMO_SCRIPT_SELECTED_FILE_PATHS}"
 if [ -z "$TARGET" ]; then
