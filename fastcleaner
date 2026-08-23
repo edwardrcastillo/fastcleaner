@@ -859,9 +859,15 @@ def install_context_menu():
                     <string>export PATH=$PATH:/usr/local/bin:~/.local/bin:/opt/homebrew/bin
 for f in "$@"
 do
-    fastcleaner "$f"
     fname=$(basename "$f")
-    osascript -e "display notification \\"Archivo '$fname' saneado con éxito (0 espacio extra)\\" with title \\"🧹 FastCleaner\\" subtitle \\"Limpieza In-Place Completada\\""
+    if [ -d "$f" ]; then
+        count=$(find "$f" -type f \( -iname "*.mkv" -o -iname "*.mp4" -o -iname "*.mov" -o -iname "*.m4v" -o -iname "*.webm" -o -iname "*.avi" -o -iname "*.ts" \) | wc -l | tr -d ' ')
+        fastcleaner "$f"
+        osascript -e "display notification \"Carpeta '$fname': $count archivos de video sanitizados con éxito (0 espacio extra)\" with title \"🧹 FastCleaner\" subtitle \"Sanitización de Carpeta Completada\""
+    else
+        fastcleaner "$f"
+        osascript -e "display notification \"Archivo '$fname' saneado con éxito (0 espacio extra)\" with title \"🧹 FastCleaner\" subtitle \"Limpieza In-Place Completada\""
+    fi
 done</string>
                     <key>CheckedForUserDefaultShell</key>
                     <true/>
@@ -923,9 +929,18 @@ fi
 while IFS= read -r f; do
     if [ -n "$f" ]; then
         export PATH=$PATH:/usr/local/bin:~/.local/bin
-        fastcleaner "$f"
-        if command -v notify-send >/dev/null 2>&1; then
-            notify-send "🧹 FastCleaner" "Saneado con éxito in-place: $(basename "$f")"
+        fname=$(basename "$f")
+        if [ -d "$f" ]; then
+            count=$(find "$f" -type f \( -iname "*.mkv" -o -iname "*.mp4" -o -iname "*.mov" -o -iname "*.m4v" -o -iname "*.webm" -o -iname "*.avi" -o -iname "*.ts" \) | wc -l | tr -d ' ')
+            fastcleaner "$f"
+            if command -v notify-send >/dev/null 2>&1; then
+                notify-send "🧹 FastCleaner" "Carpeta '$fname': $count videos sanitizados con éxito"
+            fi
+        else
+            fastcleaner "$f"
+            if command -v notify-send >/dev/null 2>&1; then
+                notify-send "🧹 FastCleaner" "Archivo '$fname' saneado con éxito in-place"
+            fi
         fi
     fi
 done <<< "$TARGET"
@@ -1051,11 +1066,17 @@ def main():
         sanitize_video_file(args.target, args.output, args.title)
     elif os.path.isdir(args.target):
         print(f"\n📂 Sanitizando lote de videos en carpeta: {args.target}...")
+        sanitized_count = 0
+        total_found = 0
         for root, _, files in os.walk(args.target):
             for f in sorted(files):
                 ext = os.path.splitext(f)[1].lower()
-                if ext in VIDEO_EXTS:
-                    sanitize_video_file(os.path.join(root, f))
+                if ext in VIDEO_EXTS and not f.startswith('.'):
+                    total_found += 1
+                    res = sanitize_video_file(os.path.join(root, f))
+                    if res.get("success"):
+                        sanitized_count += 1
+        print(f"\n🎉 ¡Proceso finalizado! Total de videos sanitizados: {sanitized_count} de {total_found} encontrados.\n")
     else:
         print(f"❌ La ruta no existe: {args.target}")
         sys.exit(1)
