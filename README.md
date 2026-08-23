@@ -49,19 +49,32 @@ curl -sSL https://raw.githubusercontent.com/edwardrcastillo/fastcleaner/main/ins
 
 ---
 
+## 🖱️ Integración en Menú Contextual (Clic Derecho)
+
+FastCleaner se integra directamente en tu explorador de archivos para sanitizar cualquier video con un solo clic:
+
+```bash
+fastcleaner --install-menu
+```
+*(Para desinstalarlo en cualquier momento: `fastcleaner --remove-menu`)*
+
+* **🍎 macOS (Finder):** Clic derecho en cualquier `.mkv` o `.mp4` -> **`🧹 Limpiar con FastCleaner`**. Ejecuta la sanitización *in-place* en 2 segundos y muestra una notificación nativa en pantalla.
+* **🐧 Linux (GNOME Nautilus / Nemo / KDE Dolphin):** Clic derecho en el video o carpeta -> **Scripts** o Menú contextual directo -> **`🧹 Limpiar con FastCleaner`**.
+* **🪟 Windows (Explorador de Archivos):** Clic derecho en cualquier archivo de video -> **`🧹 Limpiar con FastCleaner`** directamente en el menú principal.
+
+---
+
 ## 💻 Modos de Uso
 
-### 1. 🖱️ Interfaz Gráfica Web Drag & Drop (Estilo ExifCleaner)
+### 1. 🖱️ Interfaz Gráfica Web (`fastcleaner --gui`)
 
 Inicia el servidor visual interactivo:
 ```bash
 fastcleaner --gui
 ```
-Abre tu navegador en `http://localhost:8099` y **arrastra archivos o carpetas completas**. La interfaz procesará las películas en paralelo y mostrará el informe detallado:
-* Metadatos de contenedor eliminados.
-* Pistas de audio saneadas.
-* Cantidad exacta de fragmentos de subtítulos publicitarios extirpados.
-* Tiempo total de procesamiento (habitualmente **1.5s - 3s** por película).
+Abre tu navegador en `http://localhost:8099` para acceder a dos modalidades:
+* **⚡ Modo In-Place (0 Espacio Extra):** Presiona `[📂 Elegir Archivo]` o `[📁 Elegir Carpeta]` para procesar directamente sobre los archivos originales en su misma ubicación.
+* **📥 Modo Drag & Drop:** Arrastra archivos desde cualquier navegador para procesar y guardar copias en `~/Downloads/FastCleaner_Sanitized/`.
 
 ---
 

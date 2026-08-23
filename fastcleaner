@@ -766,6 +766,264 @@ def run_web_gui(port=8099):
     except KeyboardInterrupt:
         print("\n🛑 Servidor FastCleaner detenido.\n")
 
+def install_context_menu():
+    print("\n⚙️  Configurando integración en el menú contextual del explorador...")
+    system = sys.platform
+    
+    if system == "darwin":
+        services_dir = os.path.expanduser("~/Library/Services")
+        workflow_dir = os.path.join(services_dir, "🧹 Limpiar con FastCleaner.workflow")
+        contents_dir = os.path.join(workflow_dir, "Contents")
+        os.makedirs(contents_dir, exist_ok=True)
+        
+        info_plist = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>NSServices</key>
+    <array>
+        <dict>
+            <key>NSMenuItem</key>
+            <dict>
+                <key>default</key>
+                <string>🧹 Limpiar con FastCleaner</string>
+            </dict>
+            <key>NSMessage</key>
+            <string>runWorkflowAsService</string>
+            <key>NSRequiredContext</key>
+            <dict>
+                <key>NSTextContent</key>
+                <string>FilePath</string>
+            </dict>
+            <key>NSSendFileTypes</key>
+            <array>
+                <string>public.item</string>
+                <string>public.movie</string>
+                <string>public.video</string>
+                <string>com.matroska.mkv</string>
+            </array>
+        </dict>
+    </array>
+</dict>
+</plist>"""
+        
+        wflow_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>AMApplicationBuild</key>
+    <string>521.1</string>
+    <key>AMApplicationVersion</key>
+    <string>2.10</string>
+    <key>AMDocumentVersion</key>
+    <string>2</string>
+    <key>actions</key>
+    <array>
+        <dict>
+            <key>action</key>
+            <dict>
+                <key>AMAccepts</key>
+                <dict>
+                    <key>Container</key>
+                    <string>List</string>
+                    <key>Optional</key>
+                    <true/>
+                    <key>Types</key>
+                    <array>
+                        <string>com.apple.cocoa.path</string>
+                    </array>
+                </dict>
+                <key>AMActionVersion</key>
+                <string>2.0.3</string>
+                <key>AMParameterProperties</key>
+                <dict>
+                    <key>COMMAND_STRING</key>
+                    <dict/>
+                </dict>
+                <key>AMProvides</key>
+                <dict>
+                    <key>Container</key>
+                    <string>List</string>
+                    <key>Types</key>
+                    <array>
+                        <string>com.apple.cocoa.path</string>
+                    </array>
+                </dict>
+                <key>ActionBundlePath</key>
+                <string>/System/Library/Automator/Run Shell Script.action</string>
+                <key>ActionName</key>
+                <string>Run Shell Script</string>
+                <key>ActionParameters</key>
+                <dict>
+                    <key>COMMAND_STRING</key>
+                    <string>export PATH=$PATH:/usr/local/bin:~/.local/bin:/opt/homebrew/bin
+for f in "$@"
+do
+    fastcleaner "$f"
+    fname=$(basename "$f")
+    osascript -e "display notification \\"Archivo '$fname' saneado con éxito (0 espacio extra)\\" with title \\"🧹 FastCleaner\\" subtitle \\"Limpieza In-Place Completada\\""
+done</string>
+                    <key>CheckedForUserDefaultShell</key>
+                    <true/>
+                    <key>inputMethod</key>
+                    <integer>1</integer>
+                    <key>shell</key>
+                    <string>/bin/zsh</string>
+                    <key>source</key>
+                    <string></string>
+                </dict>
+                <key>BundleIdentifier</key>
+                <string>com.apple.RunShellScript</string>
+                <key>CFBundleVersion</key>
+                <string>2.0.3</string>
+            </dict>
+        </dict>
+    </array>
+    <key>workflowMetaData</key>
+    <dict>
+        <key>workflowTypeIdentifier</key>
+        <string>com.apple.Automator.servicesMenu</string>
+        <key>serviceInputTypeIdentifier</key>
+        <string>com.apple.Automator.fileSystemObject</string>
+        <key>serviceOutputTypeIdentifier</key>
+        <string>com.apple.Automator.nothing</string>
+        <key>serviceProcessesInput</key>
+        <integer>0</integer>
+    </dict>
+</dict>
+</plist>"""
+        
+        with open(os.path.join(contents_dir, "Info.plist"), "w", encoding="utf-8") as f:
+            f.write(info_plist)
+        with open(os.path.join(contents_dir, "document.wflow"), "w", encoding="utf-8") as f:
+            f.write(wflow_xml)
+            
+        try:
+            subprocess.run(["/System/Library/CoreServices/pbs", "-flush"], capture_output=True)
+        except Exception:
+            pass
+            
+        print("✅ [macOS Finder] Opción '🧹 Limpiar con FastCleaner' instalada con éxito!")
+        print("💡 Clic derecho en cualquier video o carpeta -> '🧹 Limpiar con FastCleaner'.\n")
+        
+    elif system.startswith("linux"):
+        installed_any = False
+        
+        # 1. GNOME / Nautilus / Nemo Scripts
+        nautilus_dirs = [
+            os.path.expanduser("~/.local/share/nautilus/scripts"),
+            os.path.expanduser("~/.local/share/nemo/scripts")
+        ]
+        nautilus_script = """#!/usr/bin/env bash
+# FastCleaner Context Script
+TARGET="${NAUTILUS_SCRIPT_SELECTED_FILE_PATHS:-$NEMO_SCRIPT_SELECTED_FILE_PATHS}"
+if [ -z "$TARGET" ]; then
+    TARGET="$1"
+fi
+while IFS= read -r f; do
+    if [ -n "$f" ]; then
+        export PATH=$PATH:/usr/local/bin:~/.local/bin
+        fastcleaner "$f"
+        if command -v notify-send >/dev/null 2>&1; then
+            notify-send "🧹 FastCleaner" "Saneado con éxito in-place: $(basename "$f")"
+        fi
+    fi
+done <<< "$TARGET"
+"""
+        for nd in nautilus_dirs:
+            try:
+                os.makedirs(nd, exist_ok=True)
+                script_path = os.path.join(nd, "🧹 Limpiar con FastCleaner")
+                with open(script_path, "w", encoding="utf-8") as f:
+                    f.write(nautilus_script)
+                os.chmod(script_path, 0o755)
+                installed_any = True
+                print(f"✅ [GNOME / Nautilus] Script instalado en: {script_path}")
+            except Exception:
+                pass
+
+        # 2. KDE Dolphin ServiceMenus
+        kde_dirs = [
+            os.path.expanduser("~/.local/share/kservices5/ServiceMenus"),
+            os.path.expanduser("~/.local/share/kio/servicemenus")
+        ]
+        kde_desktop = """[Desktop Entry]
+Type=Service
+ServiceTypes=KonqPopupMenu/Plugin
+MimeType=video/*;inode/directory;
+Actions=fastcleaner_clean;
+
+[Desktop Action fastcleaner_clean]
+Name=🧹 Limpiar con FastCleaner
+Icon=edit-clear
+Exec=bash -c "export PATH=$PATH:/usr/local/bin:~/.local/bin; fastcleaner '%f'; notify-send '🧹 FastCleaner' 'Saneado con éxito in-place: %n'"
+"""
+        for kd in kde_dirs:
+            try:
+                os.makedirs(kd, exist_ok=True)
+                desktop_path = os.path.join(kd, "fastcleaner.desktop")
+                with open(desktop_path, "w", encoding="utf-8") as f:
+                    f.write(kde_desktop)
+                installed_any = True
+                print(f"✅ [KDE Dolphin] Menú de servicio instalado en: {desktop_path}")
+            except Exception:
+                pass
+
+        if installed_any:
+            print("💡 Clic derecho en cualquier video o carpeta -> '🧹 Limpiar con FastCleaner'.\n")
+            
+    elif system == "win32":
+        try:
+            import winreg
+            cmd_file = 'cmd.exe /c fastcleaner "%1"'
+            cmd_dir = 'cmd.exe /c fastcleaner "%V"'
+            
+            for ext_key in ["*", "SystemFileAssociations\\.mkv", "SystemFileAssociations\\.mp4", "Directory", "Directory\\Background"]:
+                with winreg.CreateKey(winreg.HKEY_CURRENT_USER, f"Software\\Classes\\{ext_key}\\shell\\FastCleaner") as key:
+                    winreg.SetValueEx(key, "", 0, winreg.REG_SZ, "🧹 Limpiar con FastCleaner")
+                    winreg.SetValueEx(key, "Icon", 0, winreg.REG_SZ, "imageres.dll,140")
+                with winreg.CreateKey(winreg.HKEY_CURRENT_USER, f"Software\\Classes\\{ext_key}\\shell\\FastCleaner\\command") as key:
+                    winreg.SetValueEx(key, "", 0, winreg.REG_SZ, cmd_dir if "Directory" in ext_key else cmd_file)
+                    
+            print("✅ [Windows Explorer] Menú contextual '🧹 Limpiar con FastCleaner' instalado con éxito!\n")
+        except Exception as e:
+            print(f"❌ Error al registrar menú en Windows: {e}\n")
+
+def remove_context_menu():
+    print("\n🗑️  Desinstalando integración del menú contextual...")
+    system = sys.platform
+    if system == "darwin":
+        workflow_dir = os.path.expanduser("~/Library/Services/🧹 Limpiar con FastCleaner.workflow")
+        if os.path.exists(workflow_dir):
+            shutil.rmtree(workflow_dir, ignore_errors=True)
+            print("✅ [macOS Finder] Servicio eliminado correctamente.\n")
+    elif system.startswith("linux"):
+        for p in [
+            os.path.expanduser("~/.local/share/nautilus/scripts/🧹 Limpiar con FastCleaner"),
+            os.path.expanduser("~/.local/share/nemo/scripts/🧹 Limpiar con FastCleaner"),
+            os.path.expanduser("~/.local/share/kservices5/ServiceMenus/fastcleaner.desktop"),
+            os.path.expanduser("~/.local/share/kio/servicemenus/fastcleaner.desktop")
+        ]:
+            if os.path.exists(p):
+                try:
+                    os.remove(p)
+                    print(f"✅ Eliminado: {p}")
+                except Exception:
+                    pass
+        print("✅ [Linux] Scripts de menú contextual eliminados.\n")
+    elif system == "win32":
+        try:
+            import winreg
+            for ext_key in ["*", "SystemFileAssociations\\.mkv", "SystemFileAssociations\\.mp4", "Directory", "Directory\\Background"]:
+                try:
+                    winreg.DeleteKey(winreg.HKEY_CURRENT_USER, f"Software\\Classes\\{ext_key}\\shell\\FastCleaner\\command")
+                    winreg.DeleteKey(winreg.HKEY_CURRENT_USER, f"Software\\Classes\\{ext_key}\\shell\\FastCleaner")
+                except Exception:
+                    pass
+            print("✅ [Windows Explorer] Claves de menú contextual eliminadas.\n")
+        except Exception as e:
+            print(f"❌ Error al eliminar claves en Windows: {e}\n")
+
 def main():
     parser = argparse.ArgumentParser(description="🧹 FastCleaner - Sanitizador Profundo de Metadatos y Spam de Video")
     parser.add_argument("target", nargs="?", help="Ruta al archivo de video o carpeta a sanitizar.")
@@ -773,8 +1031,18 @@ def main():
     parser.add_argument("-t", "--title", help="Título limpio personalizado para el contenedor.")
     parser.add_argument("--gui", action="store_true", help="Iniciar interfaz web interactiva.")
     parser.add_argument("-p", "--port", type=int, default=8099, help="Puerto para la interfaz web (por defecto: 8099).")
+    parser.add_argument("--install-menu", "--install-context-menu", dest="install_menu", action="store_true", help="Instalar '🧹 Limpiar con FastCleaner' en el menú contextual (clic derecho) del explorador.")
+    parser.add_argument("--remove-menu", "--remove-context-menu", dest="remove_menu", action="store_true", help="Desinstalar la opción de FastCleaner del menú contextual.")
     args = parser.parse_args()
     
+    if args.install_menu:
+        install_context_menu()
+        sys.exit(0)
+        
+    if args.remove_menu:
+        remove_context_menu()
+        sys.exit(0)
+        
     if args.gui or not args.target:
         run_web_gui(args.port)
         sys.exit(0)
@@ -794,3 +1062,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
