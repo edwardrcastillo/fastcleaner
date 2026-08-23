@@ -31,7 +31,8 @@ SPAM_PATTERNS = [
     r'compucalitv', r'yts\.', r'yify', r'rarbg', r'1337x', r'gnula',
     r'sololatino', r'pelisplus', r'grantorrent', r'divx', r'identi',
     r'subdivx', r'opensubtitles', r'www\.[a-z0-9\-\.]+\.[a-z]{2,}',
-    r'https?://[^\s]+', r'\b[a-z0-9\-]+\.(com|org|net|info|top|xyz|lat|tv|ru|me|cc|to|is|cx|vip)\b'
+    r'https?://[^\s]+', r'\b[a-z0-9\-]+\.(com|org|net|info|top|xyz|lat|tv|ru|me|cc|to|is|cx|vip)\b',
+    r'\bby\s+[a-z0-9_\-\.]+', r'\b(rip|encoder|uploader|ripped|posted|repack|yify|yts|sparks|rarbg|psa|jaedo)\b'
 ]
 
 VIDEO_EXTS = {'.mkv', '.mp4', '.m4v', '.mov', '.webm', '.avi', '.ts'}
@@ -40,6 +41,14 @@ def is_spam_string(text):
     if not text: return False
     t = str(text).strip().lower()
     return any(re.search(p, t) for p in SPAM_PATTERNS)
+
+def extract_clean_movie_title(fpath):
+    base = os.path.splitext(os.path.basename(fpath))[0]
+    # Limpiar tags entre corchetes [tmdbid-...] y marcas de calidad
+    cleaned = re.sub(r'\[.*?\]', '', base).strip()
+    cleaned = re.sub(r'\b(1080p|720p|480p|4k|2160p|bluray|bdrip|dvdrip|webrip|web-dl|x264|h264|hevc|x265|latino|castellano)\b', '', cleaned, flags=re.IGNORECASE).strip()
+    cleaned = re.sub(r'\s{2,}', ' ', cleaned).strip(' -_')
+    return cleaned or base
 
 def probe_video(fpath):
     cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", fpath]
@@ -101,8 +110,17 @@ def sanitize_video_file(file_path, output_path=None, custom_title=None, verbose=
     
     fmt_title = fmt_tags.get("title", "")
     has_fmt_spam = is_spam_string(fmt_title)
+    clean_movie_name = extract_clean_movie_title(abs_in)
     
-    clean_title = custom_title or (re.sub(r'\[.*?\]|\(.*?\)', '', os.path.splitext(os.path.basename(abs_in))[0]).strip() if has_fmt_spam else fmt_title)
+    # Si el título del contenedor es spam, uploader tag o está vacío, asignar el nombre limpio de la película
+    if custom_title:
+        clean_title = custom_title
+    elif has_fmt_spam or not fmt_title or fmt_title.lower() != clean_movie_name.lower():
+        clean_title = clean_movie_name
+        if fmt_title and fmt_title != clean_movie_name:
+            has_fmt_spam = True
+    else:
+        clean_title = fmt_title
     
     v_streams = [s for s in streams if s.get("codec_type") == "video"]
     a_streams = [s for s in streams if s.get("codec_type") == "audio"]
