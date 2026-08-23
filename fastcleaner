@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-🧹 FastCleaner v1.0.0 - Deep Video Metadata Sanitizer & Spam Purger
+🧹 FastCleaner v1.1.0 - Deep Video Metadata Sanitizer & Spam Purger
 ===================================================================
 Inspirado en ExifCleaner pero diseñado para video multimedia avanzado:
  - Limpia metadatos globales del contenedor (EXIF / Matroska / MP4 Atoms).
@@ -8,7 +8,7 @@ Inspirado en ExifCleaner pero diseñado para video multimedia avanzado:
  - Descarta pistas de subtítulos basura que solo contienen publicidad.
  - Extirpa marcas de agua y spam dentro de los diálogos de subtítulos sin tocar el texto legítimo.
  - Copia sin pérdida en < 3 segundos (-c:v copy -c:a copy).
- - Interfaz Web Drag & Drop + CLI + Menú Contextual (macOS / Linux / Windows).
+ - Sanitización Directa In-Place (0 espacio extra) + Web Drag & Drop + CLI.
 """
 
 import os
@@ -84,7 +84,7 @@ def sanitize_video_file(file_path, output_path=None, custom_title=None, verbose=
     abs_in = os.path.abspath(file_path)
     if not os.path.exists(abs_in):
         if verbose: print(f"❌ Error: El archivo no existe: {file_path}")
-        return {"success": False, "error": "Archivo no encontrado"}
+        return {"success": False, "error": f"Archivo no encontrado: {file_path}"}
         
     ext = os.path.splitext(abs_in)[1].lower()
     if ext not in VIDEO_EXTS:
@@ -230,6 +230,7 @@ def sanitize_video_file(file_path, output_path=None, custom_title=None, verbose=
             except Exception: pass
         return {"success": False, "error": "Error durante el reensamblado FFmpeg"}
         
+    # Reemplazo atómico in-place
     os.replace(tmp_out, out_target)
     sz_mb = os.path.getsize(out_target) / (1024 * 1024)
     
@@ -246,8 +247,40 @@ def sanitize_video_file(file_path, output_path=None, custom_title=None, verbose=
         "cleaned": cleaned_items
     }
 
+def pick_os_path(is_folder=False):
+    """Abre el diálogo nativo del sistema operativo para seleccionar archivo o carpeta"""
+    system = sys.platform
+    if system == "darwin":
+        if is_folder:
+            cmd = ['osascript', '-e', 'POSIX path of (choose folder with prompt "Selecciona la carpeta a sanitizar con FastCleaner:")']
+        else:
+            cmd = ['osascript', '-e', 'POSIX path of (choose file of type {"mkv", "mp4", "mov", "m4v", "webm", "avi"} with prompt "Selecciona el video para sanitizar con FastCleaner:")']
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            return res.stdout.strip()
+        except Exception:
+            return ""
+    elif system.startswith("linux"):
+        if shutil.which("zenity"):
+            cmd = ["zenity", "--file-selection"]
+            if is_folder: cmd.append("--directory")
+            cmd.extend(["--title", "Selecciona archivo o carpeta para FastCleaner"])
+            try:
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+                return res.stdout.strip()
+            except Exception:
+                return ""
+        elif shutil.which("kdialog"):
+            cmd = ["kdialog", "--getexistingdirectory" if is_folder else "--getopenfilename"]
+            try:
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+                return res.stdout.strip()
+            except Exception:
+                return ""
+    return ""
+
 # ----------------------------------------------------------------------
-# GUI WEB INTERACTIVA ESTILO EXIFCLEANER (DRAG & DROP)
+# GUI WEB INTERACTIVA ESTILO EXIFCLEANER (DRAG & DROP + IN-PLACE PICKER)
 # ----------------------------------------------------------------------
 HTML_GUI = """<!DOCTYPE html>
 <html lang="es">
@@ -257,51 +290,89 @@ HTML_GUI = """<!DOCTYPE html>
     <title>🧹 FastCleaner - Deep Video Sanitizer</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
-        body { background: #090d16; color: #f8fafc; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 40px 20px; }
-        .container { max-width: 900px; width: 100%; display: flex; flex-direction: column; gap: 24px; }
+        body { background: #090d16; color: #f8fafc; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 36px 20px; }
+        .container { max-width: 900px; width: 100%; display: flex; flex-direction: column; gap: 20px; }
         
         .header { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px; }
         .logo-badge { background: linear-gradient(135deg, #10b981, #059669); color: #fff; padding: 6px 14px; border-radius: 999px; font-size: 13px; font-weight: 700; letter-spacing: 0.5px; display: inline-flex; align-items: center; gap: 6px; }
         .title { font-size: 32px; font-weight: 800; letter-spacing: -0.5px; background: linear-gradient(135deg, #ffffff, #cbd5e1); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-        .subtitle { font-size: 14.5px; color: #94a3b8; max-width: 600px; line-height: 1.5; }
+        .subtitle { font-size: 14px; color: #94a3b8; max-width: 640px; line-height: 1.5; }
+        
+        .card-panel {
+            background: rgba(15, 23, 42, 0.65);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 20px;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .panel-title { font-size: 16px; font-weight: 700; color: #38bdf8; display: flex; align-items: center; gap: 8px; }
+        
+        .direct-path-row {
+            display: flex;
+            gap: 10px;
+        }
+        .path-input {
+            flex: 1;
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 12px;
+            padding: 12px 16px;
+            color: #f8fafc;
+            font-size: 14px;
+            outline: none;
+            transition: border 0.2s;
+        }
+        .path-input:focus { border-color: #38bdf8; }
+        
+        .btn-action {
+            background: #0284c7;
+            color: #fff;
+            padding: 12px 20px;
+            border-radius: 12px;
+            font-size: 13.5px;
+            font-weight: 700;
+            border: none;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+        .btn-action:hover { background: #0369a1; transform: translateY(-1px); }
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.08);
+            color: #e2e8f0;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .btn-secondary:hover { background: rgba(255, 255, 255, 0.15); }
+        
+        .btn-group { display: flex; gap: 10px; flex-wrap: wrap; }
         
         .dropzone {
             border: 2px dashed rgba(56, 189, 248, 0.35);
-            background: rgba(15, 23, 42, 0.6);
-            backdrop-filter: blur(16px);
-            border-radius: 20px;
-            padding: 48px 24px;
+            background: rgba(15, 23, 42, 0.4);
+            border-radius: 16px;
+            padding: 32px 20px;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            gap: 16px;
+            gap: 10px;
             cursor: pointer;
             transition: all 0.25s ease;
-            position: relative;
         }
         .dropzone:hover, .dropzone.dragover {
             border-color: #38bdf8;
             background: rgba(56, 189, 248, 0.08);
-            transform: scale(1.01);
         }
-        .dropzone-icon { font-size: 48px; }
-        .dropzone-text { font-size: 18px; font-weight: 600; color: #f1f5f9; }
-        .dropzone-subtext { font-size: 13px; color: #64748b; }
-        
-        .btn-select {
-            background: #0284c7;
-            color: #fff;
-            padding: 10px 20px;
-            border-radius: 12px;
-            font-size: 14px;
-            font-weight: 600;
-            border: none;
-            cursor: pointer;
-            box-shadow: 0 4px 14px rgba(2, 132, 199, 0.35);
-            transition: background 0.2s;
-        }
-        .btn-select:hover { background: #0369a1; }
+        .dropzone-icon { font-size: 36px; }
+        .dropzone-text { font-size: 15px; font-weight: 600; color: #f1f5f9; }
+        .dropzone-subtext { font-size: 12px; color: #64748b; }
         
         .queue-card {
             background: rgba(15, 23, 42, 0.7);
@@ -314,7 +385,7 @@ HTML_GUI = """<!DOCTYPE html>
         }
         .queue-header { display: flex; justify-content: space-between; align-items: center; font-size: 15px; font-weight: 700; color: #cbd5e1; }
         
-        .file-list { display: flex; flex-direction: column; gap: 10px; }
+        .file-list { display: flex; flex-direction: column; gap: 10px; max-height: 380px; overflow-y: auto; }
         .file-item {
             background: rgba(255, 255, 255, 0.03);
             border: 1px solid rgba(255, 255, 255, 0.05);
@@ -326,47 +397,63 @@ HTML_GUI = """<!DOCTYPE html>
             gap: 14px;
         }
         .file-info { display: flex; flex-direction: column; gap: 4px; overflow: hidden; }
-        .file-name { font-size: 14px; font-weight: 600; color: #f8fafc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .file-name { font-size: 13.5px; font-weight: 600; color: #f8fafc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .file-stats { font-size: 12px; color: #94a3b8; display: flex; gap: 12px; }
-        .badge-clean { color: #10b981; background: rgba(16, 185, 129, 0.12); padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; }
-        .badge-processing { color: #38bdf8; background: rgba(56, 189, 248, 0.12); padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; }
+        .badge-clean { color: #10b981; background: rgba(16, 185, 129, 0.12); padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; }
+        .badge-processing { color: #38bdf8; background: rgba(56, 189, 248, 0.12); padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; }
         
         .features-grid {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
-            gap: 14px;
-            margin-top: 10px;
+            gap: 12px;
         }
         .feature-box {
             background: rgba(255, 255, 255, 0.02);
             border: 1px solid rgba(255, 255, 255, 0.05);
             border-radius: 14px;
-            padding: 16px;
+            padding: 14px;
             display: flex;
             flex-direction: column;
-            gap: 6px;
+            gap: 4px;
         }
-        .feature-icon { font-size: 22px; }
-        .feature-title { font-size: 13.5px; font-weight: 700; color: #e2e8f0; }
-        .feature-desc { font-size: 12px; color: #64748b; line-height: 1.4; }
+        .feature-icon { font-size: 20px; }
+        .feature-title { font-size: 13px; font-weight: 700; color: #e2e8f0; }
+        .feature-desc { font-size: 11.5px; color: #64748b; line-height: 1.4; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <span class="logo-badge">⚡ FASTCLEANER PRO</span>
+            <span class="logo-badge">⚡ FASTCLEANER PRO v1.1</span>
             <h1 class="title">Sanitizador Profundo de Video</h1>
-            <p class="subtitle">Arrastra cualquier archivo MKV o MP4 para extirpar metadatos publicitarios, limpiar nombres de pistas y sanear subtítulos en 2 segundos sin pérdida de calidad.</p>
+            <p class="subtitle">Sanea metadatos globales, etiquetas de audio y publicidad en subtítulos en 2 segundos por stream copy directo sin pérdida ni duplicar espacio en disco.</p>
         </div>
 
-        <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
-            <input type="file" id="fileInput" multiple style="display:none" onchange="handleFiles(this.files)">
-            <div class="dropzone-icon">📥</div>
-            <div class="dropzone-text">Arrastra películas o series aquí</div>
-            <div class="dropzone-subtext">Soporta .MKV, .MP4, .MOV, .M4V, .WEBM (Copia directa sin pérdida)</div>
-            <button class="btn-select" onclick="event.stopPropagation(); document.getElementById('fileInput').click()">Seleccionar Archivos</button>
+        <!-- MODO IN-PLACE (0 ESPACIO EXTRA) -->
+        <div class="card-panel">
+            <div class="panel-title">⚡ Modo In-Place (Directo en el mismo archivo / 0 Espacio Extra)</div>
+            <div class="direct-path-row">
+                <input type="text" id="localPathInput" class="path-input" placeholder="Pega o escribe la ruta de un video o carpeta (ej: /media/Peliculas/ o ~/Desktop/film.mkv)...">
+                <button class="btn-action" onclick="sanitizeLocalInput()">🧹 Sanitizar In-Place</button>
+            </div>
+            <div class="btn-group">
+                <button class="btn-action btn-secondary" onclick="pickNativeDialog(false)">📂 Elegir Archivo del Sistema...</button>
+                <button class="btn-action btn-secondary" onclick="pickNativeDialog(true)">📁 Elegir Carpeta Completa...</button>
+            </div>
         </div>
 
+        <!-- MODO DRAG & DROP WEB -->
+        <div class="card-panel">
+            <div class="panel-title">📥 Modo Drag & Drop (Navegador Web)</div>
+            <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
+                <input type="file" id="fileInput" multiple style="display:none" onchange="handleFiles(this.files)">
+                <div class="dropzone-icon">📥</div>
+                <div class="dropzone-text">Arrastra películas o series aquí</div>
+                <div class="dropzone-subtext">Soporta .MKV, .MP4, .MOV, .M4V, .WEBM (Guarda copia saneada en ~/Downloads/FastCleaner_Sanitized/)</div>
+            </div>
+        </div>
+
+        <!-- COLA DE PROCESAMIENTO -->
         <div class="queue-card" id="queueCard" style="display:none;">
             <div class="queue-header">
                 <span>📋 Archivos Procesados</span>
@@ -377,19 +464,19 @@ HTML_GUI = """<!DOCTYPE html>
 
         <div class="features-grid">
             <div class="feature-box">
-                <span class="feature-icon">🏷️</span>
-                <span class="feature-title">Pistas Sanitizadas</span>
-                <span class="feature-desc">Reemplaza etiquetas spam en audios y videos por nombres limpios como 'Español Latino'.</span>
+                <span class="feature-icon">🛡️</span>
+                <span class="feature-title">0 Espacio Extra</span>
+                <span class="feature-desc">En modo In-Place reemplaza atómicamente el archivo original sin duplicar gigabytes.</span>
             </div>
             <div class="feature-box">
                 <span class="feature-icon">💬</span>
                 <span class="feature-title">Subtítulos Purgados</span>
-                <span class="feature-desc">Descarta anuncios de 20s y extirpa URLs dentro de los subtítulos preservando todos los diálogos.</span>
+                <span class="feature-desc">Descarta pistas basura de 20s y extirpa URLs intermedias preservando todos los diálogos.</span>
             </div>
             <div class="feature-box">
                 <span class="feature-icon">⚡</span>
-                <span class="feature-title">Copia 100% Sin Pérdida</span>
-                <span class="feature-desc">Procesa en menos de 3 segundos por stream copy directo sin recodificar.</span>
+                <span class="feature-title">Copia Directa (< 3s)</span>
+                <span class="feature-desc">Procesa a velocidad nativa de disco por stream copy sin retranscodificar.</span>
             </div>
         </div>
     </div>
@@ -403,6 +490,91 @@ HTML_GUI = """<!DOCTYPE html>
             const files = ev.dataTransfer.files;
             if (files.length) handleFiles(files);
         });
+
+        async function pickNativeDialog(isFolder) {
+            try {
+                const res = await fetch(`/api/pick_native?is_folder=${isFolder ? '1' : '0'}`);
+                const data = await res.json();
+                if (data.path) {
+                    document.getElementById('localPathInput').value = data.path;
+                    await sanitizeLocalPath(data.path);
+                }
+            } catch(e) {
+                alert('No se pudo abrir el selector del sistema.');
+            }
+        }
+
+        async function sanitizeLocalInput() {
+            const path = document.getElementById('localPathInput').value.trim();
+            if (!path) {
+                alert('Por favor ingresa una ruta válida.');
+                return;
+            }
+            await sanitizeLocalPath(path);
+        }
+
+        async function sanitizeLocalPath(path) {
+            document.getElementById('queueCard').style.display = 'flex';
+            const list = document.getElementById('fileList');
+            const item = document.createElement('div');
+            item.className = 'file-item';
+            item.innerHTML = `
+                <div class="file-info">
+                    <span class="file-name">${path}</span>
+                    <span class="file-stats">Sanitizando in-place en el disco...</span>
+                </div>
+                <span class="badge-processing">⏳ Procesando</span>
+            `;
+            list.prepend(item);
+
+            try {
+                const res = await fetch('/api/sanitize_local', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: path })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    if (data.is_dir) {
+                        item.innerHTML = `
+                            <div class="file-info">
+                                <span class="file-name">✅ Carpeta: ${data.path}</span>
+                                <span class="file-stats">
+                                    <span>📁 ${data.processed_count} videos saneados in-place</span>
+                                </span>
+                            </div>
+                            <span class="badge-clean">✨ Carpeta Saneada</span>
+                        `;
+                    } else {
+                        item.innerHTML = `
+                            <div class="file-info">
+                                <span class="file-name">✅ ${data.filename}</span>
+                                <span class="file-stats">
+                                    <span>📦 ${data.size_mb} MB</span>
+                                    <span>⚡ ${data.time_sec}s (In-Place / 0 espacio extra)</span>
+                                    <span>🗑️ ${data.cleaned.sub_cues_purged} cues spam eliminados</span>
+                                </span>
+                            </div>
+                            <span class="badge-clean">✨ Saneado In-Place</span>
+                        `;
+                    }
+                } else {
+                    item.innerHTML = `
+                        <div class="file-info">
+                            <span class="file-name">❌ ${path}</span>
+                            <span class="file-stats" style="color:#ef4444;">${data.error}</span>
+                        </div>
+                    `;
+                }
+            } catch(e) {
+                item.innerHTML = `
+                    <div class="file-info">
+                        <span class="file-name">❌ ${path}</span>
+                        <span class="file-stats" style="color:#ef4444;">Error de red al procesar</span>
+                    </div>
+                `;
+            }
+        }
 
         async function handleFiles(files) {
             document.getElementById('queueCard').style.display = 'flex';
@@ -424,9 +596,6 @@ HTML_GUI = """<!DOCTYPE html>
             `;
             list.prepend(item);
 
-            const formData = new FormData();
-            formData.append('file', file);
-
             try {
                 const res = await fetch('/api/sanitize', {
                     method: 'POST',
@@ -444,7 +613,7 @@ HTML_GUI = """<!DOCTYPE html>
                                 <span>🗑️ ${data.cleaned.sub_cues_purged} cues spam extirpados</span>
                             </span>
                         </div>
-                        <span class="badge-clean">✨ Saneado</span>
+                        <span class="badge-clean">✨ Saneado en Descargas</span>
                     `;
                 } else {
                     item.innerHTML = `
@@ -476,16 +645,72 @@ class FastCleanerHandler(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
-        if self.path in ('/', '/index.html'):
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path in ('/', '/index.html'):
             self.send_response(200)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
             self.end_headers()
             self.wfile.write(HTML_GUI.encode('utf-8'))
             return
+            
+        if parsed.path == '/api/pick_native':
+            qs = urllib.parse.parse_qs(parsed.query)
+            is_folder = qs.get('is_folder', ['0'])[0] == '1'
+            chosen_path = pick_os_path(is_folder=is_folder)
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(json.dumps({"path": chosen_path}).encode('utf-8'))
+            return
+            
         self.send_error(404)
 
     def do_POST(self):
-        if self.path == '/api/sanitize':
+        parsed = urllib.parse.urlparse(self.path)
+        
+        # Modo In-Place (0 espacio extra)
+        if parsed.path == '/api/sanitize_local':
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length).decode('utf-8')
+            try:
+                payload = json.loads(body)
+            except Exception:
+                payload = {}
+                
+            raw_path = payload.get('path', '')
+            exp_path = os.path.abspath(os.path.expanduser(raw_path))
+            
+            if not os.path.exists(exp_path):
+                self.send_response(400)
+                self.send_header('Content-Type', 'application/json; charset=utf-8')
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": False, "error": f"La ruta no existe: {exp_path}"}).encode('utf-8'))
+                return
+                
+            if os.path.isfile(exp_path):
+                res = sanitize_video_file(exp_path, verbose=False)
+                res["is_dir"] = False
+                self.send_response(200 if res.get('success') else 500)
+                self.send_header('Content-Type', 'application/json; charset=utf-8')
+                self.end_headers()
+                self.wfile.write(json.dumps(res).encode('utf-8'))
+                return
+                
+            elif os.path.isdir(exp_path):
+                count = 0
+                for root, _, files in os.walk(exp_path):
+                    for f in sorted(files):
+                        if os.path.splitext(f)[1].lower() in VIDEO_EXTS:
+                            r = sanitize_video_file(os.path.join(root, f), verbose=False)
+                            if r.get('success'): count += 1
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json; charset=utf-8')
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": True, "is_dir": True, "path": exp_path, "processed_count": count}).encode('utf-8'))
+                return
+
+        # Modo Drag & Drop por HTTP (Guarda en Descargas)
+        if parsed.path == '/api/sanitize':
             filename = urllib.parse.unquote(self.headers.get('X-Filename', 'video.mkv'))
             content_length = int(self.headers.get('Content-Length', 0))
             
@@ -529,12 +754,11 @@ def run_web_gui(port=8099):
         
     url = f"http://{lan_ip}:{port}/"
     print("\n" + "="*65)
-    print("🧹 FASTCLEANER - SERVIDOR WEB DRAG & DROP")
+    print("🧹 FASTCLEANER v1.1 - SERVIDOR WEB DRAG & DROP & IN-PLACE")
     print("="*65)
     print(f"🌐 Interfaz Web: \033[1;32m{url}\033[0m")
-    print(f"📂 Archivos saneados se guardan en: ~/Downloads/FastCleaner_Sanitized/")
     print("="*65)
-    print("💡 Abre la URL en tu navegador y arrastra tus videos.\n")
+    print("💡 Abre la URL en tu navegador para sanitizar archivos o carpetas.\n")
     
     server = FastCleanerServer(("0.0.0.0", port), FastCleanerHandler)
     try:
@@ -545,17 +769,13 @@ def run_web_gui(port=8099):
 def main():
     parser = argparse.ArgumentParser(description="🧹 FastCleaner - Sanitizador Profundo de Metadatos y Spam de Video")
     parser.add_argument("target", nargs="?", help="Ruta al archivo de video o carpeta a sanitizar.")
-    parser.add_argument("-o", "--output", help="Ruta de salida (por defecto: sobrescribe en el lugar).")
+    parser.add_argument("-o", "--output", help="Ruta de salida (por defecto: sobrescribe in-place en el mismo archivo).")
     parser.add_argument("-t", "--title", help="Título limpio personalizado para el contenedor.")
-    parser.add_argument("--gui", action="store_true", help="Iniciar interfaz web interactiva estilo Drag & Drop.")
+    parser.add_argument("--gui", action="store_true", help="Iniciar interfaz web interactiva.")
     parser.add_argument("-p", "--port", type=int, default=8099, help="Puerto para la interfaz web (por defecto: 8099).")
     args = parser.parse_args()
     
-    if args.gui:
-        run_web_gui(args.port)
-        sys.exit(0)
-        
-    if not args.target:
+    if args.gui or not args.target:
         run_web_gui(args.port)
         sys.exit(0)
         
